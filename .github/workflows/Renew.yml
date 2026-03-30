@@ -5,7 +5,6 @@ on:
   schedule:
     - cron: '0 */3 * * *'   # 每 3 小时执行一次 (UTC)
 
-# 必须添加 contents: write 才能提交 time.txt，actions: write 用于删除旧日志
 permissions:
   contents: write
   actions: write
@@ -19,9 +18,6 @@ jobs:
       - name: 📥 下载公库代码
         uses: actions/checkout@v4
 
-      # ============================================================
-      # 🔒 核心逻辑：使用 Token 从你的私有仓库拉取脚本
-      # ============================================================
       - name: 📥 下载私库脚本
         uses: actions/checkout@v4
         with:
@@ -30,7 +26,6 @@ jobs:
           path: private
 
       - name: 📂 移动脚本到工作目录
-        # 这里假设你私有仓库里的代码文件名为 main.py
         run: mv private/main.py main.py
 
       - name: 🐍 设置 Python
@@ -48,9 +43,6 @@ jobs:
           pip install seleniumbase requests
           sbase install chromedriver
 
-      # ============================================================
-      # 🛡️ 代理逻辑：恢复为原有的 Vless + Xray 解析启动
-      # ============================================================
       - name: 🛡️ 解析 Vless 链接并启动代理节点
         env:
           VLESS_LINK: ${{ secrets.VLESS_LINK }}
@@ -142,9 +134,6 @@ jobs:
             git push origin HEAD:main
           fi
 
-      # ============================================================
-      # 🧹 清理旧的 Workflow 运行记录 (只保留最近3条)
-      # ============================================================
       - name: 🧹 清理旧的运行记录
         if: always()
         env:
