@@ -90,10 +90,16 @@ jobs:
             sleep 3
             echo "==========================================="
             echo "🌐 测试代理节点 IP 及归属地："
-            curl -s -x socks5://127.0.0.1:10808 http://ip-api.com/json | jq -c 'if .status == "success" then .query="***.***.***.***" | .lat="***" | .lon="***" | .isp="***" | .org="***" | .as="***" | .zip="***" else . end' || echo "⚠️ 无法获取代理 IP"
+            
+            curl -s -x socks5://127.0.0.1:10808 http://ip-api.com/json | \
+            jq -c 'if .status == "success" then .lat="***" | .lon="***" | .isp="***" | .org="***" | .as="***" | .zip="***" else . end' | \
+            sed -E 's/("query":"[0-9]+\.[0-9]+)\.[0-9]+\.[0-9]+"/\1.*.*/g' || echo "⚠️ 无法获取代理 IP"
             
             echo -e "\n🚀 测试 IceHost 连通性："
-            curl -I -s -x socks5://127.0.0.1:10808 https://dash.icehost.pl | sed -E 's/(s=)[^"]+/\1***/g' | sed -E 's/(cf-ray: )[^-]+/\1***/g' || echo "⚠️ 无法连接到目标网站"
+            
+            curl -I -s -x socks5://127.0.0.1:10808 https://dash.icehost.pl | \
+            sed -E 's/(s=)[^"]+/\1***/g' | sed -E 's/(cf-ray: )[^-]+/\1***/g' || echo "⚠️ 无法连接到目标网站"
+            
             echo "==========================================="
           fi
 
