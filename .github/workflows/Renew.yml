@@ -128,15 +128,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 覆盖写入最新运行时间
-          echo "最新运行时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+          # 覆盖写入最新运行时间 (使用北京时间)
+          echo "最新运行时间：$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')" > time.txt
           
           git add time.txt
           if git diff --cached --quiet; then 
             echo "无变化，无需提交"
           else 
-            git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
-            # 解决 Git 冲突：先拉取远程最新代码再推送
+            # Commit 附带北京时间
+            git commit -m "⏱️ 更新时间文件: $(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
