@@ -3,7 +3,7 @@ name: Icehost-Renew
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *'   # 每 3 小时执行一次 (UTC)
+    - cron: '17 */3 * * *'   # 每 3 小时执行一次 (UTC)
 
 permissions:
   contents: write
