@@ -1,0 +1,162 @@
+name: Icehost-Renew
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */3 * * *'   # 每 3 小时执行一次 (UTC)
+
+# 必须添加 contents: write 才能提交 time.txt，actions: write 用于删除旧日志
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  run_icehost_renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 下载公库代码
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # 🔒 核心逻辑：使用 Token 从你的私有仓库拉取脚本
+      # ============================================================
+      - name: 📥 下载私库脚本
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/Icehost-Auto-Private
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: private
+
+      - name: 📂 移动脚本到工作目录
+        # 这里假设你私有仓库里的代码文件名为 main.py
+        run: mv private/main.py main.py
+
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🛠️ 安装系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb xdotool
+
+      - name: 🐍 安装 Python 依赖
+        run: |
+          pip install seleniumbase requests
+          sbase install chromedriver
+
+      # ============================================================
+      # 🛡️ 代理逻辑：恢复为原有的 Vless + Xray 解析启动
+      # ============================================================
+      - name: 🛡️ 解析 Vless 链接并启动代理节点
+        env:
+          VLESS_LINK: ${{ secrets.VLESS_LINK }}
+        run: |
+          wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -q Xray-linux-64.zip -d xray-core
+          
+          python - <<EOF
+          import urllib.parse, json, os, sys
+          link = os.environ.get('VLESS_LINK', '').strip()
+          if not link.startswith('vless://'):
+              print('⚠️ 未配置 VLESS_LINK，跳过代理。')
+              sys.exit(0)
+          
+          try:
+              parsed = urllib.parse.urlparse(link)
+              qs = urllib.parse.parse_qs(parsed.query)
+              def get_qs(k, default=''): return urllib.parse.unquote(qs.get(k, [default])[0])
+              
+              stream = {'network': get_qs('type', 'tcp'), 'security': get_qs('security', 'none')}
+              if stream['security'] == 'tls':
+                  stream['tlsSettings'] = {'serverName': get_qs('sni', parsed.hostname), 'fingerprint': get_qs('fp', 'chrome')}
+                  if get_qs('alpn'): stream['tlsSettings']['alpn'] = get_qs('alpn').split(',')
+              elif stream['security'] == 'reality':
+                  stream['realitySettings'] = {'serverName': get_qs('sni', parsed.hostname), 'fingerprint': get_qs('fp', 'chrome'), 'publicKey': get_qs('pbk'), 'shortId': get_qs('sid')}
+              if stream['network'] == 'ws':
+                  stream['wsSettings'] = {'path': get_qs('path', '/'), 'headers': {'Host': get_qs('host', parsed.hostname)}}
+              elif stream['network'] == 'grpc':
+                  stream['grpcSettings'] = {'serviceName': get_qs('serviceName', ''), 'multiMode': get_qs('mode', 'multi') == 'multi'}
+              
+              config = {
+                  'inbounds': [{'port': 10808, 'listen': '127.0.0.1', 'protocol': 'socks', 'settings': {'udp': True}}],
+                  'outbounds': [{'protocol': 'vless', 'settings': {'vnext': [{'address': parsed.hostname, 'port': int(parsed.port), 'users': [{'id': parsed.username, 'encryption': 'none', 'flow': get_qs('flow', '')}]}]}, 'streamSettings': stream}]
+              }
+              with open('xray-core/config.json', 'w') as f:
+                  json.dump(config, f, indent=2)
+              print('✅ vless 链接自动解析成功！')
+          except Exception as e:
+              print(f'❌ 解析失败: {e}')
+          EOF
+          
+          if [ -f "xray-core/config.json" ]; then
+            cd xray-core
+            ./xray run -c config.json &
+            sleep 3
+            echo "==========================================="
+            echo "🌐 测试代理节点 IP 及归属地："
+            curl -s -x socks5://127.0.0.1:10808 http://ip-api.com/json || echo "⚠️ 无法获取代理 IP"
+            echo -e "\n\n🚀 测试 IceHost 连通性："
+            curl -I -s -x socks5://127.0.0.1:10808 https://dash.icehost.pl || echo "⚠️ 无法连接到目标网站"
+            echo "==========================================="
+          fi
+
+      - name: 🚀 运行续期脚本
+        env:
+          PYTHONIOENCODING: utf-8
+          REMEMBER_WEB_COOKIE: ${{ secrets.REMEMBER_WEB_COOKIE }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_URL: "socks5://127.0.0.1:10808" 
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python -u main.py
+
+      - name: 📸 上传调试截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshots-${{ github.run_id }}
+          path: "*.png"
+          retention-days: 3
+
+      - name: 📝 更新运行时间文件
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 覆盖写入最新运行时间
+          echo "最新运行时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+          
+          git add time.txt
+          if git diff --cached --quiet; then 
+            echo "无变化，无需提交"
+          else 
+            git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
+            # 解决 Git 冲突：先拉取远程最新代码再推送
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      # ============================================================
+      # 🧹 清理旧的 Workflow 运行记录 (只保留最近3条)
+      # ============================================================
+      - name: 🧹 清理旧的运行记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "正在查询旧的运行记录..."
+          run_ids=$(gh run list --workflow "${{ github.workflow }}" --limit 50 --json databaseId --jq '.[].databaseId' | \
+                    grep -v "${{ github.run_id }}" | \
+                    tail -n +3)
+
+          for id in $run_ids; do
+            echo "正在删除运行记录 ID: $id"
+            gh run delete "$id" || true
+          done
+          echo "✅ 清理完成，仅保留最近运行记录。"
